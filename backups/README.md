@@ -4,7 +4,7 @@
 
 ## 文件说明
 
-- `backup_YYYYMMDD_HHMMSS.json`: 带时间戳的备份文件
+- `backup_YYYYMMDD_HHMMSS.json`: 带时间标记的备份文件
 - `latest_backup.json`: 最新的备份文件（每次备份后都会更新）
 
 ## 自动管理
