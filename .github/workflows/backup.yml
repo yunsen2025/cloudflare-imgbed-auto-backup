@@ -1,0 +1,49 @@
+name: 自动备份数据
+
+on:
+  schedule:
+    # 每天UTC时间18:00运行（北京时间02:00）
+    - cron: '0 18 * * *'
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: 设置Python环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: 运行备份脚本
+      env:
+        BACKUP_URL: ${{ secrets.BACKUP_URL }}
+        BACKUP_USERNAME: ${{ secrets.BACKUP_USERNAME }}
+        BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+        MAX_BACKUPS: ${{ secrets.MAX_BACKUPS || '100' }}
+        ENABLE_CHANGE_DETECTION: ${{ secrets.ENABLE_CHANGE_DETECTION || 'true' }}
+      run: |
+        python backup_script.py
+    
+    - name: 提交备份文件
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add backups/
+        if git diff --staged --quiet; then
+          echo "没有新的备份文件需要提交"
+        else
+          git commit -m "自动备份: $(date '+%Y-%m-%d %H:%M:%S')"
+          git push
+        fi
