@@ -33,6 +33,8 @@ jobs:
         BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
         MAX_BACKUPS: ${{ secrets.MAX_BACKUPS || '100' }}
         ENABLE_CHANGE_DETECTION: ${{ secrets.ENABLE_CHANGE_DETECTION || 'true' }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
       run: |
         python backup_script.py
     

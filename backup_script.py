@@ -11,6 +11,7 @@ import requests
 from datetime import datetime
 import logging
 import hashlib
+import time
 
 # 配置日志
 logging.basicConfig(
@@ -26,6 +27,10 @@ class BackupManager:
         self.username = os.getenv('BACKUP_USERNAME') 
         self.password = os.getenv('BACKUP_PASSWORD')
         
+        # GitHub相关配置
+        self.github_token = os.getenv('GITHUB_TOKEN')
+        self.github_repository = os.getenv('GITHUB_REPOSITORY')  # 格式: owner/repo
+        
         # 获取保留备份文件数量，默认100个
         max_backups_str = os.getenv('MAX_BACKUPS', '100')
         try:
@@ -37,6 +42,9 @@ class BackupManager:
         # 获取是否启用变更检测，默认启用
         change_detection_str = os.getenv('ENABLE_CHANGE_DETECTION', 'true')
         self.enable_change_detection = change_detection_str.strip().lower() in ('true', '1', 'yes', 'on') if change_detection_str.strip() else True
+        
+        # 强制执行私有仓库检查，不可禁用
+        self.force_private_repo = True
         
         # 验证环境变量
         if not all([self.base_url, self.username, self.password]):
@@ -62,6 +70,92 @@ class BackupManager:
         logger.info(f"备份管理器初始化完成，备份URL: {self.backup_url}")
         logger.info(f"最大保留备份文件数: {self.max_backups}")
         logger.info(f"变更检测: {'启用' if self.enable_change_detection else '禁用'}")
+        logger.info("🔒 私有仓库检查: 强制启用（不可禁用）")
+    
+    def check_repository_privacy(self):
+        """检查GitHub仓库是否为私有（强制执行，不可禁用）"""
+        if not self.github_token or not self.github_repository:
+            logger.error("❌ 安全检查失败：缺少GitHub Token或Repository信息")
+            logger.error("无法验证仓库隐私状态，为了安全起见，备份任务将被终止")
+            logger.error("环境变量要求：GITHUB_TOKEN 和 GITHUB_REPOSITORY")
+            logger.error("注意：本程序强制要求使用私有仓库，此检查无法禁用")
+            return False
+        
+        try:
+            logger.info("🔒 正在检查仓库隐私状态...")
+            
+            # 检查标记文件是否存在
+            privacy_check_file = os.path.join(self.backup_dir, '.privacy_verified')
+            
+            headers = {
+                'Authorization': f'token {self.github_token}',
+                'Accept': 'application/vnd.github.v3+json',
+                'User-Agent': 'Backup-Security-Check/1.0'
+            }
+            
+            # 调用GitHub API检查仓库信息
+            api_url = f"https://api.github.com/repos/{self.github_repository}"
+            response = requests.get(api_url, headers=headers, timeout=30)
+            
+            if response.status_code == 404:
+                logger.error("❌ 仓库不存在或无权限访问")
+                return False
+            elif response.status_code != 200:
+                logger.error(f"❌ GitHub API请求失败，状态码: {response.status_code}")
+                logger.error(f"响应内容: {response.text[:500]}")
+                return False
+            
+            repo_info = response.json()
+            is_private = repo_info.get('private', False)
+            
+            if not is_private:
+                logger.error("❌ 🚨 严重安全警告：仓库当前为公开状态！ 🚨")
+                logger.error("")
+                logger.error("📢 此项目会备份包含敏感信息的数据文件！")
+                logger.error("📢 公开仓库会导致您的敏感数据被任何人访问！")
+                logger.error("")
+                logger.error("🛡️  请立即执行以下步骤保护您的数据：")
+                logger.error("   1. 前往 GitHub 仓库设置页面")
+                logger.error(f"   2. 访问: https://github.com/{self.github_repository}/settings")
+                logger.error("   3. 滚动到页面底部的 'Danger Zone' 区域")
+                logger.error("   4. 点击 'Change repository visibility'")
+                logger.error("   5. 选择 'Make private' 将仓库设为私有")
+                logger.error("")
+                logger.error("🔧 设置完成后，您可以通过以下方式之一重新运行：")
+                logger.error("   • 手动触发 GitHub Actions workflow")
+                logger.error("   • 等待下次定时任务执行")
+                logger.error("   • 或者设置环境变量 FORCE_PRIVATE_REPO=false 来跳过此检查（不推荐）")
+                logger.error("")
+                logger.error("⚠️  为了您的数据安全，备份任务现在将被终止")
+                
+                return False
+            
+            logger.info("✅ 仓库隐私检查通过：仓库为私有状态")
+            
+            # 如果是首次通过检查，创建标记文件并给出提示
+            if not os.path.exists(privacy_check_file):
+                try:
+                    with open(privacy_check_file, 'w', encoding='utf-8') as f:
+                        f.write(f"Privacy check passed at: {datetime.now().isoformat()}\n")
+                        f.write(f"Repository: {self.github_repository}\n")
+                        f.write(f"Status: Private\n")
+                    
+                    logger.info("🎉 首次隐私检查通过！已创建验证标记文件")
+                    logger.info("✨ 您的仓库配置正确，数据将得到安全保护")
+                    
+                except Exception as e:
+                    logger.warning(f"无法创建隐私验证标记文件: {e}")
+            
+            return True
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ 网络请求失败: {e}")
+            logger.error("无法验证仓库隐私状态，为了安全起见，备份任务将被终止")
+            return False
+        except Exception as e:
+            logger.error(f"❌ 隐私检查过程中发生错误: {e}")
+            logger.error("为了安全起见，备份任务将被终止")
+            return False
     
     def create_session(self):
         """创建带有认证的会话"""
@@ -267,22 +361,33 @@ class BackupManager:
 def main():
     """主函数"""
     try:
-        logger.info("开始执行备份任务...")
+        logger.info("🚀 开始执行备份任务...")
+        logger.info("=" * 60)
         
         # 创建备份管理器
         backup_manager = BackupManager()
+        
+        # 首先进行仓库隐私检查
+        logger.info("🔐 执行安全检查...")
+        if not backup_manager.check_repository_privacy():
+            logger.error("❌ 安全检查失败，备份任务已终止")
+            logger.error("请确保仓库为私有状态后重新运行")
+            exit(1)
+        
+        logger.info("✅ 安全检查通过，继续执行备份...")
+        logger.info("=" * 60)
         
         # 执行备份
         success = backup_manager.download_backup()
         
         if success:
-            logger.info("备份任务执行成功！")
+            logger.info("🎉 备份任务执行成功！")
         else:
-            logger.error("备份任务执行失败！")
+            logger.error("❌ 备份任务执行失败！")
             exit(1)
             
     except Exception as e:
-        logger.error(f"备份任务执行过程中发生未预期的错误: {e}")
+        logger.error(f"❌ 备份任务执行过程中发生未预期的错误: {e}")
         exit(1)
 
 if __name__ == "__main__":
