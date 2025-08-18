@@ -9,6 +9,8 @@ on:
 jobs:
   backup:
     runs-on: ubuntu-latest
+    # 只在私有仓库中运行，避免在公开仓库中浪费Actions额度
+    if: github.event.repository.private == true
     
     steps:
     - name: 检出代码

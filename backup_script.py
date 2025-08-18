@@ -247,15 +247,41 @@ class BackupManager:
             return False
     
     def calculate_data_hash(self, data):
-        """计算数据的MD5哈希值"""
+        """计算数据的MD5哈希值（排除动态时间戳字段）"""
         try:
+            # 创建数据副本，排除可能的动态字段
+            data_copy = self.normalize_data_for_hash(data)
+            
             # 将数据转换为标准化的JSON字符串
-            json_str = json.dumps(data, sort_keys=True, separators=(',', ':'))
+            json_str = json.dumps(data_copy, sort_keys=True, separators=(',', ':'))
             # 计算MD5哈希
             return hashlib.md5(json_str.encode('utf-8')).hexdigest()
         except Exception as e:
             logger.error(f"计算数据哈希时发生错误: {e}")
             return None
+    
+    def normalize_data_for_hash(self, data):
+        """标准化数据用于哈希计算，排除动态字段"""
+        try:
+            if isinstance(data, dict):
+                # 创建数据副本
+                normalized = {}
+                for key, value in data.items():
+                    # 排除动态时间戳字段
+                    if key.lower() in ['timestamp', 'created_at', 'updated_at', 'last_modified', 'date', 'time']:
+                        continue
+                    # 递归处理嵌套对象
+                    normalized[key] = self.normalize_data_for_hash(value)
+                return normalized
+            elif isinstance(data, list):
+                # 递归处理列表中的每个元素
+                return [self.normalize_data_for_hash(item) for item in data]
+            else:
+                # 基本类型直接返回
+                return data
+        except Exception as e:
+            logger.error(f"标准化数据时发生错误: {e}")
+            return data  # 发生错误时返回原始数据
     
     def get_latest_backup_hash(self):
         """获取最新备份文件的哈希值"""
@@ -288,11 +314,15 @@ class BackupManager:
             return True
         
         # 比较哈希值
+        logger.info(f"数据哈希对比：")
+        logger.info(f"  新数据哈希: {new_hash[:16]}...")
+        logger.info(f"  历史数据哈希: {latest_hash[:16]}...")
+        
         if new_hash == latest_hash:
-            logger.info("数据未发生变化，跳过本次备份")
+            logger.info("✅ 数据未发生变化（排除时间戳），跳过本次备份")
             return False
         else:
-            logger.info("检测到数据变化，将保存新的备份")
+            logger.info("🔄 检测到实际数据变化，将保存新的备份")
             return True
     
     def save_backup(self, data):

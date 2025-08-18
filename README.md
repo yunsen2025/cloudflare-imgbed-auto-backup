@@ -10,6 +10,7 @@
 > - 因此，在使用本项目前请确保您已将仓库**解除复刻网络**并更改为**私有**  
 > - 如果仓库为公开状态，程序将拒绝执行并显示安全警告  
 > **步骤：你的仓库➡Settings➡General➡（划到最下面）Danger➡Leave fork network➡Change repository visibility**  
+> (其实公开仓库不会执行actions)
 
 
 
